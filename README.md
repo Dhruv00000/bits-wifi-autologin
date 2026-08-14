@@ -4,4 +4,4 @@ An app to automatically log into the BITS goa campus wifi
 
 # Miscellaneous information:
 
-- for desktop devices, use [https://github.com/Devsoc-BPGC/auto-campnet](auto-campnet)
+- for desktop devices, use [auto-campnet]([auto-campnet](https://github.com/Devsoc-BPGC/auto-campnet))
