@@ -7,6 +7,12 @@ An app to automatically log into BITS campus networks
 - This app was initially made for the goa campus, but I am working on supporting all three campuses
 
 # Installation instructions
+## Method 1: direct apk download
 1) Go to [the 'releases' page](https://github.com/Dhruv00000/bits-wifi-autologin/releases/latest).
 2) Download the apk file.
 3) Run the apk file to install the app.
+
+## Method 2: f-droid (for automatic updates)
+1) Download and install [droidify](https://github.com/Droid-ify/client/releases/tag/v0.7.5) (recommended) or [F-droid](https://f-droid.org/F-Droid.apk)
+2) Open droidify/f-droid
+3) 
