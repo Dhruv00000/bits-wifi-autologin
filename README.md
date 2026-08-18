@@ -16,3 +16,7 @@ An app to automatically log into BITS campus networks
 1) Download and install [droidify](https://github.com/Droid-ify/client/releases/tag/v0.7.5) (recommended) or [F-droid](https://f-droid.org/F-Droid.apk)
 2) Open droidify/f-droid
 3) 
+
+# Credits:
+1) My friends for helping me test this app
+2) [Magnific](https://www.magnific.com/icons) for the [app icon](https://www.flaticon.com/free-icon/wifi_1589718)
