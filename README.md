@@ -20,3 +20,4 @@ An app to automatically log into BITS campus networks
 # Credits:
 1) My friends for helping me test this app
 2) [Magnific](https://www.magnific.com/icons) for the [app icon](https://www.flaticon.com/free-icon/wifi_1589718)
+3) The [original app](https://github.com/sparshg/wifi-login)'s author
