@@ -1,5 +1,6 @@
 package com.example.bitsgoaauto_login
 
+import android.net.Network
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
@@ -10,13 +11,20 @@ import java.net.URLEncoder
 import javax.net.ssl.HttpsURLConnection
 import kotlin.time.Duration.Companion.milliseconds
 
-suspend fun sendLoginRequest(username: String, password: String): Result<String> = withContext(
-    Dispatchers.IO
-) {
+suspend fun sendLoginRequest(
+    username: String,
+    password: String,
+    network: Network? = null
+): Result<String> = withContext(Dispatchers.IO) {
 
     try {
-        val probeConnection =
-            URL("http://connectivitycheck.gstatic.com/generate_204").openConnection() as HttpURLConnection
+        val probeUrl = URL("http://connectivitycheck.gstatic.com/generate_204")
+        val probeConnection = if (network != null) {
+            network.openConnection(probeUrl)
+        } else {
+            probeUrl.openConnection()
+        } as HttpURLConnection
+
         probeConnection.connectTimeout = 3000
         probeConnection.readTimeout = 3000
         probeConnection.instanceFollowRedirects = false
@@ -41,16 +49,22 @@ suspend fun sendLoginRequest(username: String, password: String): Result<String>
                 )
             }&a=${System.currentTimeMillis()}&producttype=0"
 
-            val connection =
-                (URL("https://campnet.bits-goa.ac.in:8090/httpclient.html").openConnection() as HttpsURLConnection).apply {
-                    requestMethod = "POST"
-                    doOutput = true
-                    doInput = true
-                    connectTimeout = 7000
-                    readTimeout = 7000
-                    setRequestProperty("Content-Type", "application/x-www-form-urlencoded")
-                    setRequestProperty("Content-Length", postData.length.toString())
-                }
+            val portalUrl = URL("https://campnet.bits-goa.ac.in:8090/httpclient.html")
+            val connection = if (network != null) {
+                network.openConnection(portalUrl)
+            } else {
+                portalUrl.openConnection()
+            } as HttpsURLConnection
+
+            connection.apply {
+                requestMethod = "POST"
+                doOutput = true
+                doInput = true
+                connectTimeout = 7000
+                readTimeout = 7000
+                setRequestProperty("Content-Type", "application/x-www-form-urlencoded")
+                setRequestProperty("Content-Length", postData.length.toString())
+            }
 
             OutputStreamWriter(connection.outputStream).use { writer ->
                 writer.write(postData)

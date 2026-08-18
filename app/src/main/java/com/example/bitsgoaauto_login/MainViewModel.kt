@@ -1,6 +1,7 @@
 package com.example.bitsgoaauto_login
 
 import android.app.Application
+import android.app.NotificationManager
 import android.content.Context
 import android.content.Intent
 import android.net.ConnectivityManager
@@ -11,6 +12,7 @@ import android.net.wifi.WifiInfo
 import android.net.wifi.WifiManager
 import android.net.wifi.WifiNetworkSuggestion
 import android.os.Build
+import android.content.SharedPreferences
 import androidx.core.content.edit
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
@@ -39,13 +41,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
         )
     }
+    private val settingsPreferences by lazy {
+        application.getSharedPreferences("app_settings", Context.MODE_PRIVATE)
+    }
     private val connectivityManager =
         application.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
     private val wifiManager =
         application.getSystemService(Context.WIFI_SERVICE) as WifiManager
     private val workManager = WorkManager.getInstance(application)
     private val _isServiceEnabled =
-        MutableStateFlow(sharedPreferences.getBoolean("isServiceEnabled", true))
+        MutableStateFlow(settingsPreferences.getBoolean("isServiceEnabled", true))
     val isServiceEnabled: StateFlow<Boolean> = _isServiceEnabled.asStateFlow()
     private val _isWifiConnected = MutableStateFlow(false)
     val isWifiConnected: StateFlow<Boolean> = _isWifiConnected.asStateFlow()
@@ -98,8 +103,18 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_CAPTIVE_PORTAL)
         }
     }
+    private val preferenceChangeListener = SharedPreferences.OnSharedPreferenceChangeListener { prefs, key ->
+            if (key == "isServiceEnabled") {
+                val newValue = prefs.getBoolean(key, true)
+                if (_isServiceEnabled.value != newValue) {
+                    _isServiceEnabled.value = newValue
+                    updateServiceAndWorker()
+                }
+            }
+        }
 
     init {
+        settingsPreferences.registerOnSharedPreferenceChangeListener(preferenceChangeListener)
         connectivityManager.registerNetworkCallback(
             (NetworkRequest.Builder()
                 .addTransportType(NetworkCapabilities.TRANSPORT_WIFI)
@@ -109,9 +124,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun toggleService(enabled: Boolean) {
-        _isServiceEnabled.value = enabled
-        sharedPreferences.edit { putBoolean("isServiceEnabled", enabled) }
-        updateServiceAndWorker()
+        settingsPreferences.edit { putBoolean("isServiceEnabled", enabled) }
     }
 
     private fun updateServiceAndWorker() {
@@ -136,6 +149,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     builder.build()
                 }
                 try {
+                    wifiManager.removeNetworkSuggestions(emptyList())
                     wifiManager.addNetworkSuggestions(suggestions)
                 } catch (_: Exception) {
                     // Exceptions are ignored here because, in some cases (like when Wi-Fi is turned off), an exception is thrown, and the app doesn't need to care about that.
@@ -154,6 +168,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             )
         } else {
             context.stopService(serviceIntent)
+            val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+            notificationManager.cancelAll()
             workManager.cancelUniqueWork("HeartbeatWork")
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                 wifiManager.removeNetworkSuggestions(emptyList<WifiNetworkSuggestion>())
@@ -190,7 +206,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun deleteCredentials() {
         sharedPreferences.edit { clear() }
         _hasCredentials.value = false
-        sharedPreferences.edit { putBoolean("isServiceEnabled", _isServiceEnabled.value) }
     }
 
     fun refreshConnectivity() {
@@ -209,6 +224,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     override fun onCleared() {
         super.onCleared()
+        settingsPreferences.unregisterOnSharedPreferenceChangeListener(preferenceChangeListener)
         connectivityManager.unregisterNetworkCallback(networkCallback)
     }
 

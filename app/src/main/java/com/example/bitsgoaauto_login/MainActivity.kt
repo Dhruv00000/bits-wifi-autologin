@@ -32,7 +32,6 @@ import androidx.compose.material.icons.automirrored.filled.Login
 import androidx.compose.material.icons.filled.BugReport
 import androidx.compose.material.icons.filled.Cancel
 import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.Code
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Language
@@ -84,7 +83,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.bitsgoaauto_login.ui.theme.BITSGoaAutologinTheme
 import kotlinx.coroutines.launch
 
-class MainActivity : ComponentActivity() { //TODO: Add an app icon
+class MainActivity : ComponentActivity() {
     @OptIn(ExperimentalMaterial3Api::class)
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -369,11 +368,12 @@ fun HeroCard(
                     !hasCredentials -> "Please add\ncredentials first"
                     !isServiceEnabled -> "The app has\nbeen disabled"
                     isCaptivePortal -> "Attempting to\nsign-in..."
-                    isWifiConnected && !isWifiValidated -> "Checking for\nlogin portal..."
+                    isWifiConnected && !isWifiValidated -> "Checking login\nportal..."
                     isWifiConnected && isWifiValidated -> {
                         val name = ssid.ifBlank { "Wi-Fi" }
                         "Connected to\n$name"
                     }
+
                     else -> "Offline"
                 },
                 color = Color.Black,

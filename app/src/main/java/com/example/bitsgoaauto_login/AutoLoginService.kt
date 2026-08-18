@@ -6,6 +6,7 @@ import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.Service
 import android.content.Intent
+import android.content.SharedPreferences
 import android.content.pm.ServiceInfo
 import android.net.ConnectivityManager
 import android.net.Network
@@ -16,6 +17,7 @@ import android.net.wifi.WifiManager
 import android.os.Build
 import android.os.IBinder
 import androidx.core.app.NotificationCompat
+import androidx.core.content.edit
 import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKey
 import kotlinx.coroutines.CoroutineScope
@@ -29,6 +31,7 @@ class AutoLoginService : Service() {
     private lateinit var connectivityManager: ConnectivityManager
     private lateinit var wifiManager: WifiManager
     private lateinit var sharedPreferences: EncryptedSharedPreferences
+    private lateinit var settingsPreferences: SharedPreferences
 
     private val networkCallback = object : ConnectivityManager.NetworkCallback() {
         override fun onCapabilitiesChanged(network: Network, capabilities: NetworkCapabilities) {
@@ -51,6 +54,10 @@ class AutoLoginService : Service() {
     override fun onCreate() {
         super.onCreate()
 
+        val notificationManager = getSystemService(NOTIFICATION_SERVICE) as NotificationManager
+        notificationManager.cancelAll()
+        startForegroundService()
+
         connectivityManager = getSystemService(CONNECTIVITY_SERVICE) as ConnectivityManager
         wifiManager = getSystemService(WIFI_SERVICE) as WifiManager
         sharedPreferences = EncryptedSharedPreferences.create(
@@ -60,8 +67,8 @@ class AutoLoginService : Service() {
             EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
             EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
         ) as EncryptedSharedPreferences
+        settingsPreferences = getSharedPreferences("app_settings", MODE_PRIVATE)
 
-        startForegroundService()
         connectivityManager.registerNetworkCallback(
             NetworkRequest.Builder()
                 .addTransportType(NetworkCapabilities.TRANSPORT_WIFI)
@@ -77,7 +84,7 @@ class AutoLoginService : Service() {
             NotificationChannel(
                 channelId,
                 "Auto Login Service",
-                NotificationManager.IMPORTANCE_LOW
+                NotificationManager.IMPORTANCE_DEFAULT
             )
         )
 
@@ -91,12 +98,21 @@ class AutoLoginService : Service() {
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         )
 
+        val disableIntent = Intent(this, AutoLoginService::class.java).apply {
+            action = ACTION_DISABLE_SERVICE
+        }
+        val disablePendingIntent = PendingIntent.getService(
+            this, 1, disableIntent,
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+        )
+
         val notification: Notification = NotificationCompat.Builder(this, channelId)
             .setContentTitle("BITS Auto-Login Active")
             .setContentText("Monitoring Wi-Fi for login portal...")
             .setSmallIcon(R.mipmap.ic_launcher)
             .setOngoing(true)
             .setContentIntent(pendingIntent)
+            .addAction(R.mipmap.ic_launcher, "Disable background service", disablePendingIntent)
             .build()
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
@@ -119,6 +135,11 @@ class AutoLoginService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        if (intent?.action == ACTION_DISABLE_SERVICE) {
+            settingsPreferences.edit { putBoolean("isServiceEnabled", false) }
+            stopSelf()
+            return START_NOT_STICKY
+        }
         return START_STICKY
     }
 
@@ -127,6 +148,10 @@ class AutoLoginService : Service() {
     override fun onDestroy() {
         super.onDestroy()
         connectivityManager.unregisterNetworkCallback(networkCallback)
+    }
+
+    companion object {
+        private const val ACTION_DISABLE_SERVICE = "com.example.bitsgoaauto_login.DISABLE_SERVICE"
     }
 
 }
