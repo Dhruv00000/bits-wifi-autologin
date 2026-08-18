@@ -8,7 +8,7 @@ An app to automatically log into BITS campus networks
 
 # Installation instructions
 ## Method 1: direct apk download
-1) Go to [the 'releases' page](https://github.com/Dhruv00000/bits-wifi-autologin/releases/latest).
+1) Go to [the latest release](https://github.com/Dhruv00000/bits-wifi-autologin/releases/latest).
 2) Download the apk file.
 3) Run the apk file to install the app.
 
