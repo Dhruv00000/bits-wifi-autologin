@@ -16,9 +16,11 @@ suspend fun sendLoginRequest(
     password: String,
     network: Network? = null
 ): Result<String> = withContext(Dispatchers.IO) {
+    DebugLogger.log("sendLoginRequest started. Network=$network")
 
     try {
         val probeUrl = URL("http://connectivitycheck.gstatic.com/generate_204")
+        DebugLogger.log("Checking internet probe: $probeUrl")
         val probeConnection = if (network != null) {
             network.openConnection(probeUrl)
         } else {
@@ -31,10 +33,13 @@ suspend fun sendLoginRequest(
         probeConnection.disconnect()
 
         if (probeConnection.responseCode == 204) {
+            DebugLogger.log("Internet probe success (204). Device already authenticated.")
             return@withContext Result.success("<message><![CDATA[Already authenticated]]></message>")
+        } else {
+            DebugLogger.log("Internet probe redirected/failed (Code: ${probeConnection.responseCode}). Proceeding to login.")
         }
-    } catch (_: Exception) {
-        // Probe failed or redirected, proceed with login request
+    } catch (e: Exception) {
+        DebugLogger.log("Internet probe exception: ${e.message}. Proceeding to login.")
     }
 
     var lastThrowable: Throwable? = null
@@ -66,20 +71,24 @@ suspend fun sendLoginRequest(
                 setRequestProperty("Content-Length", postData.length.toString())
             }
 
+            DebugLogger.log("Sending portal request: ${connection.url}")
             OutputStreamWriter(connection.outputStream).use { writer ->
                 writer.write(postData)
                 writer.flush()
             }
 
             val responseCode = connection.responseCode
+            DebugLogger.log("Portal response code: $responseCode")
             if (responseCode == HttpsURLConnection.HTTP_OK) {
                 val text = connection.inputStream.bufferedReader().use { it.readText() }
                 connection.disconnect()
+                DebugLogger.log("Portal response content: ${text.take(100)}...")
                 return@withContext Result.success(text)
             } else {
                 val errorText = connection.errorStream?.bufferedReader()?.use { it.readText() }
                     ?: "HTTP Error $responseCode"
                 connection.disconnect()
+                DebugLogger.log("Portal login failed: $errorText")
 
                 val exception = Exception("Server returned status code: $errorText")
 

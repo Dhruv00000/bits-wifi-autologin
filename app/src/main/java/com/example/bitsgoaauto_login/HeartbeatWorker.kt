@@ -15,8 +15,10 @@ class HeartbeatWorker(
     workerParams: WorkerParameters
 ) : CoroutineWorker(appContext, workerParams) {
     override suspend fun doWork(): Result = withContext(Dispatchers.IO) {
+        DebugLogger.log("HeartbeatWorker started")
         try {
             val isPortalReachable = try {
+                DebugLogger.log("Heartbeat: Checking portal reachability")
                 val connection =
                     URL("https://campnet.bits-goa.ac.in:8090/httpclient.html").openConnection() as HttpURLConnection
                 connection.connectTimeout = 5000
@@ -27,7 +29,9 @@ class HeartbeatWorker(
             } catch (_: Exception) {
                 false
             }
+            DebugLogger.log("Heartbeat: Portal reachable = $isPortalReachable")
             if (!isPortalReachable) {
+                DebugLogger.log("Heartbeat: Portal unreachable. Triggering auto-login.")
                 val sharedPreferences = EncryptedSharedPreferences.create(
                     applicationContext,
                     "secret_shared_prefs",

@@ -98,9 +98,10 @@ class MainActivity : ComponentActivity() {
             val ssid by viewModel.ssid.collectAsState()
             val hasCredentials by viewModel.hasCredentials.collectAsState()
             val loginResult by viewModel.loginResult.collectAsState()
+            val logs by DebugLogger.logs.collectAsState()
 
-            BITSGoaAutologinTheme { //TODO: https://www.youtube.com/watch?v=HmXgVBys7BU
-
+            BITSGoaAutologinTheme { //TODO: responsive UI
+                var showDebugLogs by remember { mutableStateOf(value = false) }
                 val currentContext = LocalContext.current
                 var showBottomSheet by remember { mutableStateOf(false) }
                 val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = false)
@@ -110,7 +111,7 @@ class MainActivity : ComponentActivity() {
                     mutableStateOf(
                         (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) || (ContextCompat.checkSelfPermission(
                             currentContext,
-                            android.Manifest.permission.POST_NOTIFICATIONS
+                            android.Manifest.permission.POST_NOTIFICATIONS,
                         ) == PackageManager.PERMISSION_GRANTED)
                     )
                 }
@@ -149,7 +150,8 @@ class MainActivity : ComponentActivity() {
                                     .find(response)?.groupValues?.get(1)?.trim()
                                     ?.takeIf { it.isNotBlank() }
                                     ?: "Login executed successfully",
-                                Toast.LENGTH_LONG).show()
+                                Toast.LENGTH_LONG
+                            ).show()
                         }.onFailure {
                             Toast.makeText(
                                 currentContext,
@@ -170,6 +172,15 @@ class MainActivity : ComponentActivity() {
                                     style = MaterialTheme.typography.headlineSmall.copy(fontWeight = FontWeight.SemiBold),
                                     color = if (isServiceEnabled) colorScheme.onSurface else colorScheme.onSurfaceVariant
                                 )
+                            },
+                            navigationIcon = {
+                                IconButton(onClick = { showDebugLogs = true }) {
+                                    Icon(
+                                        imageVector = Icons.Default.BugReport,
+                                        contentDescription = "Open debug logs",
+                                        tint = if (isServiceEnabled) colorScheme.onSurface else colorScheme.onSurfaceVariant
+                                    )
+                                }
                             },
                             actions = {
                                 Switch(
@@ -200,7 +211,7 @@ class MainActivity : ComponentActivity() {
                         item(span = { GridItemSpan(maxLineSpan) }) {
                             Spacer(modifier = Modifier.height(16.dp))
                         }
-                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU && !locationPermissionGranted) {
+                        if ((Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) && !locationPermissionGranted) {
                             item(span = { GridItemSpan(maxLineSpan) }) {
                                 LocationPermissionsWarningCard()
                             }
@@ -280,9 +291,8 @@ class MainActivity : ComponentActivity() {
 
                 if (showDeleteDialog) {
                     DeleteConfirmationDialog(
-                        onConfirm = { viewModel.deleteCredentials(); showDeleteDialog = false },
-                        onDismiss = { showDeleteDialog = false }
-                    )
+                        onConfirm = { viewModel.deleteCredentials(); showDeleteDialog = false }
+                    ) { showDeleteDialog = false }
                 }
 
                 if (showBottomSheet) {
@@ -296,6 +306,15 @@ class MainActivity : ComponentActivity() {
                         sheetState = sheetState
                     )
                 }
+
+                if (showDebugLogs) {
+                    DebugLogsBottomSheet(
+                        logs = logs,
+                        onDismiss = { showDebugLogs = false },
+                        onClear = { DebugLogger.clear() }
+                    )
+                }
+
             }
         }
     }
@@ -339,7 +358,7 @@ fun HeroCard(
                     color = when {
                         !(isServiceEnabled && hasCredentials) -> Color(0xFFef1810)
                         isCaptivePortal || (isWifiConnected && !isWifiValidated) -> Color(0xFFe5e500)
-                        isWifiConnected && isWifiValidated -> Color(0xFF80ef80)
+                        isWifiValidated -> Color(0xFF80ef80)
                         else -> Color(0xFFef1810)
                     }
                 )
@@ -353,7 +372,7 @@ fun HeroCard(
                     !hasCredentials -> Icons.Default.LockPerson
                     !isServiceEnabled -> Icons.Default.Cancel
                     isCaptivePortal || (isWifiConnected && !isWifiValidated) -> Icons.Default.Language
-                    isWifiConnected && isWifiValidated -> Icons.Default.Wifi
+                    isWifiValidated -> Icons.Default.Wifi
                     else -> Icons.Default.WifiOff
                 },
                 contentDescription = "Status Icon",
@@ -538,6 +557,60 @@ fun CredentialsBottomSheet(
                 Text("Save Credentials")
             }
 
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun DebugLogsBottomSheet(
+    logs: List<String>,
+    onDismiss: () -> Unit,
+    onClear: () -> Unit
+) {
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(16.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text("System Debug Logs", style = MaterialTheme.typography.titleLarge)
+                Button(onClick = onClear) {
+                    Text("Clear")
+                }
+            }
+            Spacer(Modifier.height(16.dp))
+            androidx.compose.foundation.lazy.LazyColumn(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .weight(1f)
+                    .background(Color.Black, RoundedCornerShape(8.dp))
+                    .padding(8.dp)
+            ) {
+                items(logs.size) { index ->
+                    Text(
+                        text = logs[index],
+                        color = Color.Green,
+                        style = MaterialTheme.typography.bodySmall,
+                        modifier = Modifier.padding(vertical = 2.dp)
+                    )
+                }
+            }
+            Spacer(Modifier.height(16.dp))
+            Button(
+                onClick = onDismiss,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text("Close")
+            }
         }
     }
 }

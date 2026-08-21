@@ -22,8 +22,11 @@ import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKey
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlin.time.Duration.Companion.seconds
 
 class AutoLoginService : Service() {
 
@@ -32,27 +35,55 @@ class AutoLoginService : Service() {
     private lateinit var wifiManager: WifiManager
     private lateinit var sharedPreferences: EncryptedSharedPreferences
     private lateinit var settingsPreferences: SharedPreferences
+    private var activeLoginJob: Job? = null
+    private var currentNetwork: Network? = null
 
     private val networkCallback = object : ConnectivityManager.NetworkCallback() {
-        override fun onCapabilitiesChanged(network: Network, capabilities: NetworkCapabilities) {
-            if (capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_CAPTIVE_PORTAL)) {
-                val currentSsid = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                    val wifiInfo = capabilities.transportInfo as? WifiInfo
-                    wifiInfo?.ssid?.replace("\"", "") ?: ""
-                } else {
-                    @Suppress("DEPRECATION")
-                    wifiManager.connectionInfo.ssid?.replace("\"", "") ?: ""
-                }
 
-                if (MainViewModel.isCampusNetwork(currentSsid)) {
-                    attemptAutoLogin()
+        override fun onAvailable(network: Network) {
+            currentNetwork = network
+        }
+
+        override fun onLost(network: Network) {
+            if (currentNetwork == network) {
+                currentNetwork = null
+            }
+        }
+
+        override fun onCapabilitiesChanged(network: Network, capabilities: NetworkCapabilities) {
+            currentNetwork = network
+            if (capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_CAPTIVE_PORTAL)) {
+                val currentSsid = getSsid(capabilities)
+
+                if (MainViewModel.isCampusNetwork(currentSsid) || currentSsid == "<unknown ssid>" || currentSsid.isEmpty()) {
+                    DebugLogger.log("Service detected portal. SSID: $currentSsid. Proceeding with auto-login check.")
+                    attemptAutoLogin(network)
+                } else {
+                    DebugLogger.log("Service detected non-campus portal: $currentSsid. Ignoring.")
                 }
             }
         }
     }
 
+    private fun getSsid(capabilities: NetworkCapabilities): String {
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            val wifiInfo = capabilities.transportInfo as? WifiInfo
+            val ssid = wifiInfo?.ssid?.replace("\"", "") ?: ""
+            if (ssid == "<unknown ssid>" || ssid.isEmpty()) {
+                @Suppress("DEPRECATION")
+                wifiManager.connectionInfo.ssid?.replace("\"", "") ?: ""
+            } else {
+                ssid
+            }
+        } else {
+            @Suppress("DEPRECATION")
+            wifiManager.connectionInfo.ssid?.replace("\"", "") ?: ""
+        }
+    }
+
     override fun onCreate() {
         super.onCreate()
+        DebugLogger.log("AutoLoginService Created")
 
         val notificationManager = getSystemService(NOTIFICATION_SERVICE) as NotificationManager
         notificationManager.cancelAll()
@@ -106,13 +137,22 @@ class AutoLoginService : Service() {
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         )
 
+        val manualLoginIntent = Intent(this, AutoLoginService::class.java).apply {
+            action = ACTION_MANUAL_LOGIN
+        }
+        val manualLoginPendingIntent = PendingIntent.getService(
+            this, 2, manualLoginIntent,
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+        )
+
         val notification: Notification = NotificationCompat.Builder(this, channelId)
             .setContentTitle("BITS Auto-Login Active")
             .setContentText("Monitoring Wi-Fi for login portal...")
             .setSmallIcon(R.mipmap.ic_launcher)
             .setOngoing(true)
             .setContentIntent(pendingIntent)
-            .addAction(R.mipmap.ic_launcher, "Disable background service", disablePendingIntent)
+            .addAction(R.mipmap.ic_launcher, "Disable service", disablePendingIntent)
+            .addAction(R.mipmap.ic_launcher, "Trigger login", manualLoginPendingIntent)
             .build()
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
@@ -123,22 +163,83 @@ class AutoLoginService : Service() {
 
     }
 
-    private fun attemptAutoLogin() {
+    private fun attemptAutoLogin(network: Network) {
         val username = sharedPreferences.getString("username", "") ?: ""
         val password = sharedPreferences.getString("password", "") ?: ""
 
-        if (username.isNotBlank() && password.isNotBlank()) {
-            serviceScope.launch {
-                sendLoginRequest(username, password)
+        if (username.isBlank() || password.isBlank()) {
+            DebugLogger.log("Auto-login skipped: Credentials missing")
+            return
+        }
+
+        activeLoginJob?.cancel()
+        activeLoginJob = serviceScope.launch {
+            DebugLogger.log("Background login job started for network: $network")
+            delay(2.seconds)
+
+            val currentSsid = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                val wifiInfo = connectivityManager.getNetworkCapabilities(network)?.transportInfo as? WifiInfo
+                wifiInfo?.ssid?.replace("\"", "") ?: ""
+            } else {
+                @Suppress("DEPRECATION")
+                wifiManager.connectionInfo.ssid?.replace("\"", "") ?: ""
+            }.let {
+                if (it == "<unknown ssid>" || it.isEmpty()) {
+                    @Suppress("DEPRECATION")
+                    wifiManager.connectionInfo.ssid?.replace("\"", "") ?: ""
+                } else it
             }
+
+            if (!MainViewModel.isCampusNetwork(currentSsid) && currentSsid != "<unknown ssid>" && currentSsid.isNotEmpty()) {
+                DebugLogger.log("Re-checked SSID: $currentSsid. Definitely not campus. Aborting.")
+                return@launch
+            }
+
+            var success = false
+            var retries = 0
+            val maxRetries = 3
+            while (!success && retries < maxRetries) {
+                DebugLogger.log("Background login attempt ${retries + 1}")
+                val result = sendLoginRequest(username, password, network)
+                result.onSuccess { response ->
+                    DebugLogger.log("Background login success: $response")
+                    if (response.contains("Login successful") || response.contains("Already authenticated") || response.contains(
+                            "Already logged in"
+                        )
+                    ) {
+                        success = true
+                        connectivityManager.reportNetworkConnectivity(network, true)
+                    }
+                }.onFailure { error ->
+                    DebugLogger.log("Background login fail (Attempt ${retries + 1}): ${error.message}")
+                    retries++
+                    if (retries < maxRetries) {
+                        delay(3.seconds)
+                    }
+                }
+                if (result.isSuccess) success = true
+            }
+            if (!success) DebugLogger.log("Background login failed after $maxRetries attempts")
         }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        if (intent?.action == ACTION_DISABLE_SERVICE) {
-            settingsPreferences.edit { putBoolean("isServiceEnabled", false) }
-            stopSelf()
-            return START_NOT_STICKY
+        when (intent?.action) {
+            ACTION_DISABLE_SERVICE -> {
+                DebugLogger.log("Service disabling from notification")
+                settingsPreferences.edit { putBoolean("isServiceEnabled", false) }
+                stopSelf()
+                return START_NOT_STICKY
+            }
+
+            ACTION_MANUAL_LOGIN -> {
+                DebugLogger.log("Manual login triggered from notification")
+                currentNetwork?.let {
+                    attemptAutoLogin(it)
+                } ?: run {
+                    DebugLogger.log("Manual login failed: No Wi-Fi network detected")
+                }
+            }
         }
         return START_STICKY
     }
@@ -147,11 +248,13 @@ class AutoLoginService : Service() {
 
     override fun onDestroy() {
         super.onDestroy()
+        DebugLogger.log("AutoLoginService Destroyed")
         connectivityManager.unregisterNetworkCallback(networkCallback)
     }
 
     companion object {
         private const val ACTION_DISABLE_SERVICE = "com.example.bitsgoaauto_login.DISABLE_SERVICE"
+        private const val ACTION_MANUAL_LOGIN = "com.example.bitsgoaauto_login.MANUAL_LOGIN"
     }
 
 }

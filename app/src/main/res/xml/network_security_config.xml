@@ -2,7 +2,7 @@
 <network-security-config>
     <domain-config cleartextTrafficPermitted="true">
         <domain includeSubdomains="true">campnet.bits-goa.ac.in</domain>
-        <!-- Adding common local IP for portals as a precaution -->
+        <domain includeSubdomains="true">connectivitycheck.gstatic.com</domain>
         <domain includeSubdomains="true">10.1.1.1</domain>
     </domain-config>
 </network-security-config>

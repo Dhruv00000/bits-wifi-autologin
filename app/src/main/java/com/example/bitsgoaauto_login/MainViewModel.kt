@@ -49,6 +49,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val wifiManager =
         application.getSystemService(Context.WIFI_SERVICE) as WifiManager
     private val workManager = WorkManager.getInstance(application)
+    private var currentWifiNetwork: Network? = null
     private val _isServiceEnabled =
         MutableStateFlow(settingsPreferences.getBoolean("isServiceEnabled", true))
     val isServiceEnabled: StateFlow<Boolean> = _isServiceEnabled.asStateFlow()
@@ -72,18 +73,29 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val networkCallback = object : ConnectivityManager.NetworkCallback() {
 
         override fun onAvailable(network: Network) {
+            DebugLogger.log("WiFi Available: $network")
             _isWifiConnected.value = true
+            currentWifiNetwork = network
         }
 
         override fun onLost(network: Network) {
+            DebugLogger.log("WiFi Lost: $network")
             _isWifiConnected.value = false
             _isWifiValidated.value = false
             _isCaptivePortal.value = false
+            currentWifiNetwork = null
         }
 
         override fun onCapabilitiesChanged(network: Network, capabilities: NetworkCapabilities) {
-            _isWifiValidated.value =
-                capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)
+
+            val validated = capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)
+            val captive =
+                capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_CAPTIVE_PORTAL)
+            if (_isWifiValidated.value != validated || _isCaptivePortal.value != captive) {
+                DebugLogger.log("Capabilities changed: Validated=$validated, CaptivePortal=$captive")
+            }
+
+            _isWifiValidated.value = validated
             var currentSsid = ""
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                 val wifiInfo = capabilities.transportInfo as? WifiInfo
@@ -99,11 +111,20 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 currentSsid = wifiManager.connectionInfo.ssid?.replace("\"", "") ?: ""
             }
             _ssid.value = currentSsid
-            _isCaptivePortal.value = isCampusNetwork(currentSsid) &&
-                    capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_CAPTIVE_PORTAL)
+
+            val campus = isCampusNetwork(currentSsid)
+            val portalDetected =
+                (campus || currentSsid == "<unknown ssid>" || currentSsid.isEmpty()) &&
+                        capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_CAPTIVE_PORTAL)
+            if (_isCaptivePortal.value != portalDetected) {
+                DebugLogger.log("Portal Detection: SSID=$currentSsid, IsCampus=$campus, Portal=$portalDetected")
+            }
+            _isCaptivePortal.value = portalDetected
+
         }
     }
-    private val preferenceChangeListener = SharedPreferences.OnSharedPreferenceChangeListener { prefs, key ->
+    private val preferenceChangeListener =
+        SharedPreferences.OnSharedPreferenceChangeListener { prefs, key ->
             if (key == "isServiceEnabled") {
                 val newValue = prefs.getBoolean(key, true)
                 if (_isServiceEnabled.value != newValue) {
@@ -124,6 +145,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun toggleService(enabled: Boolean) {
+        DebugLogger.log("Toggling service to: $enabled")
         settingsPreferences.edit { putBoolean("isServiceEnabled", enabled) }
     }
 
@@ -134,8 +156,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val serviceIntent = Intent(context, AutoLoginService::class.java)
 
         if (enabled) {
+            DebugLogger.log("Starting service and scheduling worker")
             context.startForegroundService(serviceIntent)
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                DebugLogger.log("Adding network suggestions for ${CAMPUS_SSIDS.size} SSIDs")
                 val suggestions = CAMPUS_SSIDS.map { ssid ->
                     val builder = WifiNetworkSuggestion.Builder()
                         .setSsid(ssid)
@@ -149,7 +173,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     builder.build()
                 }
                 try {
-                    wifiManager.removeNetworkSuggestions(emptyList())
+                    wifiManager.removeNetworkSuggestions(suggestions)
                     wifiManager.addNetworkSuggestions(suggestions)
                 } catch (_: Exception) {
                     // Exceptions are ignored here because, in some cases (like when Wi-Fi is turned off), an exception is thrown, and the app doesn't need to care about that.
@@ -167,12 +191,17 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 heartbeatRequest
             )
         } else {
+            DebugLogger.log("Stopping service and cancelling tasks")
             context.stopService(serviceIntent)
-            val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+            val notificationManager =
+                context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
             notificationManager.cancelAll()
             workManager.cancelUniqueWork("HeartbeatWork")
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                wifiManager.removeNetworkSuggestions(emptyList<WifiNetworkSuggestion>())
+                DebugLogger.log("Removing network suggestions")
+                wifiManager.removeNetworkSuggestions(CAMPUS_SSIDS.map { ssid ->
+                    WifiNetworkSuggestion.Builder().setSsid(ssid).build()
+                })
             }
         }
 
@@ -186,8 +215,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             return
         }
         viewModelScope.launch(Dispatchers.IO) {
-            val result = sendLoginRequest(username, password)
+            val result = sendLoginRequest(username, password, currentWifiNetwork)
             _loginResult.value = result
+            if (result.isSuccess && currentWifiNetwork != null) {
+                connectivityManager.reportNetworkConnectivity(currentWifiNetwork, true)
+            }
         }
     }
 
@@ -242,7 +274,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         )
         fun isCampusNetwork(ssid: String?): Boolean {
             if (ssid.isNullOrBlank() || ssid == "<unknown ssid>") return false
-            return CAMPUS_KEYWORDS.any { ssid.contains(it, ignoreCase = true) }
+            val cleanSsid = ssid.replace("\"", "")
+            return CAMPUS_KEYWORDS.any { cleanSsid.contains(it, ignoreCase = true) }
         }
     }
 
