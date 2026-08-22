@@ -12,11 +12,6 @@ An app to automatically log into BITS campus networks
 2) Download the apk file.
 3) Run the apk file to install the app.
 
-## Method 2: f-droid (for automatic updates)
-1) Download and install [droidify](https://github.com/Droid-ify/client/releases/tag/v0.7.5) (recommended) or [F-droid](https://f-droid.org/F-Droid.apk)
-2) Open droidify/f-droid
-3) 
-
 # Showcase
 ![App screenshot](./fastlane/metadata/android/en-US/images/phoneScreenshots/18_08_2026__16_51_07.png)
 
